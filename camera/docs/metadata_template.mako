@@ -134,11 +134,17 @@
                 <enum>
                   % for value in prop.enum.values:
                       <value
+                    % if value.deprecated:
+                             deprecated="true"
+                    % endif:
                     % if value.optional:
                              optional="true"
                     % endif:
                     % if value.hidden:
                              hidden="true"
+                    % endif:
+                    % if value.ndk_hidden:
+                             ndk_hidden="true"
                     % endif:
                     % if value.id is not None:
                              id="${value.id}"

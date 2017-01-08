@@ -351,6 +351,21 @@ class Metadata(Node):
       self._entry_map[p.kind].pop(p.name)
       self._entries_ordered.remove(p)
 
+  def is_entry_this_kind(self, entry, kind):
+    """
+    Check if input entry if of input kind
+
+    Args:
+      entry: an Entry object
+      kind: a string. Possible values are "static", "dynamic", "controls"
+
+    Returns:
+      A boolean indicating whether input entry is of input kind.
+    """
+    if kind not in ("static", "dynamic", "controls"):
+      assert(False), "Unknown kind value " + kind
+
+    return entry.name in self._entry_map[kind]
 
   # After all entries/clones are inserted,
   # invoke this to generate the parent/child node graph all these objects
@@ -943,16 +958,21 @@ class EnumValue(Node):
   Attributes (Read-Only):
     name: A string,                 e.g. 'ON' or 'OFF'
     id: An optional numeric string, e.g. '0' or '0xFF'
+    deprecated: A boolean, True if the enum should be deprecated.
     optional: A boolean
     hidden: A boolean, True if the enum should be hidden.
+    ndk_hidden: A boolean, True if the enum should be hidden in NDK
     notes: A string describing the notes, or None.
     parent: An edge to the parent, always an Enum instance.
   """
-  def __init__(self, name, parent, id=None, optional=False, hidden=False, notes=None):
+  def __init__(self, name, parent,
+      id=None, deprecated=False, optional=False, hidden=False, notes=None, ndk_hidden=False):
     self._name = name                    # str, e.g. 'ON' or 'OFF'
     self._id = id                        # int, e.g. '0'
+    self._deprecated = deprecated        # bool
     self._optional = optional            # bool
     self._hidden = hidden                # bool
+    self._ndk_hidden = ndk_hidden        # bool
     self._notes = notes                  # None or str
     self._parent = parent
 
@@ -961,12 +981,20 @@ class EnumValue(Node):
     return self._id
 
   @property
+  def deprecated(self):
+    return self._deprecated
+
+  @property
   def optional(self):
     return self._optional
 
   @property
   def hidden(self):
     return self._hidden
+
+  @property
+  def ndk_hidden(self):
+    return self._ndk_hidden
 
   @property
   def notes(self):
@@ -985,10 +1013,11 @@ class Enum(Node):
     has_values_with_id: A boolean representing if any of the children have a
         non-empty id property.
   """
-  def __init__(self, parent, values, ids={}, optionals=[], hiddens=[], notes={}):
+  def __init__(self, parent, values, ids={}, deprecateds=[],
+      optionals=[], hiddens=[], notes={}, ndk_hiddens=[]):
     self._values =                                                             \
-      [ EnumValue(val, self, ids.get(val), val in optionals, val in hiddens,   \
-                  notes.get(val))                                              \
+      [ EnumValue(val, self, ids.get(val), val in deprecateds, val in optionals, val in hiddens,  \
+                  notes.get(val), val in ndk_hiddens)                                              \
         for val in values ]
 
     self._parent = parent
@@ -1025,6 +1054,9 @@ class Entry(Node):
                 public entries are visible in the Android SDK.
     applied_visibility: As visibility, but always valid, defaulting to 'system'
                         if no visibility is given for an entry.
+    applied_ndk_visible: Always valid. Default is 'false'.
+                         Set to 'true' when the visibility implied entry is visible
+                         in NDK.
     synthetic: The C-level visibility of this entry ('false', 'true').
                Synthetic entries will not be generated into the native metadata
                list of entries (in C code). In general a synthetic entry is
@@ -1129,6 +1161,12 @@ class Entry(Node):
   @property
   def applied_visibility(self):
     return self._visibility or 'system'
+
+  @property
+  def applied_ndk_visible(self):
+    if self._visibility in ("public", "ndk_public"):
+      return "true"
+    return "false"
 
   @property
   def synthetic(self):
@@ -1237,8 +1275,10 @@ class Entry(Node):
 
     # access these via the 'enum' prop
     enum_values = kwargs.get('enum_values')
+    enum_deprecateds = kwargs.get('enum_deprecateds')
     enum_optionals = kwargs.get('enum_optionals')
     enum_hiddens = kwargs.get('enum_hiddens')
+    enum_ndk_hiddens = kwargs.get('enum_ndk_hiddens')
     enum_notes = kwargs.get('enum_notes')  # { value => notes }
     enum_ids = kwargs.get('enum_ids')  # { value => notes }
     self._tuple_values = kwargs.get('tuple_values')
@@ -1257,8 +1297,8 @@ class Entry(Node):
     self._typedef = None # Filled in by Metadata::_construct_types
 
     if kwargs.get('enum', False):
-      self._enum = Enum(self, enum_values, enum_ids, enum_optionals,
-                        enum_hiddens, enum_notes)
+      self._enum = Enum(self, enum_values, enum_ids, enum_deprecateds, enum_optionals,
+                        enum_hiddens, enum_notes, enum_ndk_hiddens)
     else:
       self._enum = None
 
@@ -1267,6 +1307,7 @@ class Entry(Node):
     self._hwlevel = kwargs.get('hwlevel')
     self._deprecated = kwargs.get('deprecated', False)
     self._optional = kwargs.get('optional')
+    self._ndk_visible = kwargs.get('ndk_visible')
 
     self._property_keys = kwargs
 
@@ -1463,6 +1504,7 @@ class MergedEntry(Entry):
                     'type',
                     'type_notes',
                     'visibility',
+                    'ndk_visible',
                     'synthetic',
                     'hwlevel',
                     'deprecated',
